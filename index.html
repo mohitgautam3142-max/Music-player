@@ -405,31 +405,45 @@ new Vue({
     async fetchSongs(query) {
       this.loading = true;
       this.error = null;
-      try {
-        const res = await fetch(`https://saavn.dev/api/search/songs?query=${encodeURIComponent(query)}&limit=20`);
-        if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        const results = data?.data?.results || [];
-        const parsed = results.map(s => {
-          const url = s.downloadUrl?.slice(-1)[0]?.url || '';
-          const cover = s.image?.slice(-1)[0]?.url || '';
-          const mins = Math.floor((s.duration||0)/60);
-          const secs = (s.duration||0)%60;
-          return {
-            id: s.id,
-            name: s.name || 'Unknown',
-            artist: s.artists?.primary?.map(a=>a.name).join(', ') || 'Unknown',
-            album: s.album?.name || '',
-            cover: cover || 'https://picsum.photos/seed/'+s.id+'/200/200',
-            url,
-            duration: mins+':'+(secs<10?'0':'')+secs
-          };
-        }).filter(s => s.url);
-        this.songs = parsed;
-        if (parsed.length === 0) this.error = 'No songs found for "'+query+'". Try another search.';
-      } catch(e) {
-        this.error = 'Could not connect to music service. Check your internet and try again.';
+      const apiUrl = `https://saavn.dev/api/search/songs?query=${encodeURIComponent(query)}&limit=20`;
+      const proxies = [
+        url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        url => `https://proxy.corsfix.com/?${url}`,
+      ];
+      let data = null;
+      for (let i = 0; i < proxies.length; i++) {
+        try {
+          const proxyUrl = proxies[i](apiUrl);
+          const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+          if (!res.ok) continue;
+          data = await res.json();
+          if (data?.data?.results) break;
+        } catch(e) { continue; }
       }
+      if (!data?.data?.results) {
+        this.error = 'Could not load songs. Make sure you have internet and try again.';
+        this.loading = false;
+        return;
+      }
+      const results = data.data.results;
+      const parsed = results.map(s => {
+        const url = s.downloadUrl?.slice(-1)[0]?.url || '';
+        const cover = s.image?.slice(-1)[0]?.url || '';
+        const mins = Math.floor((s.duration||0)/60);
+        const secs = (s.duration||0)%60;
+        return {
+          id: s.id,
+          name: s.name || 'Unknown',
+          artist: s.artists?.primary?.map(a=>a.name).join(', ') || 'Unknown',
+          album: s.album?.name || '',
+          cover: cover || 'https://picsum.photos/seed/'+s.id+'/200/200',
+          url,
+          duration: mins+':'+(secs<10?'0':'')+secs
+        };
+      }).filter(s => s.url);
+      this.songs = parsed;
+      if (parsed.length === 0) this.error = 'No songs found for "'+query+'". Try another search.';
       this.loading = false;
     },
 
